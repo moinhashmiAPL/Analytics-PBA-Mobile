@@ -15,8 +15,12 @@ import android.content.Context.LOCATION_SERVICE
 import android.content.Intent
 import android.content.Intent.ACTION_MAIN
 import android.content.pm.ApplicationInfo
+import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.database.Cursor
+import android.location.Address
+import android.location.Geocoder
+import android.location.Location
 import android.location.LocationManager
 import android.os.Build
 import android.os.Process
@@ -29,13 +33,8 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.collection.ArrayMap
 import androidx.core.app.AppOpsManagerCompat.MODE_ALLOWED
-import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.coroutineScope
-import com.library.pbamobile.callback.PBACallbackListener
-import com.library.pbamobile.model.DeviceInfo
-import com.library.pbamobile.model.InstalledApplication
-import com.library.pbamobile.model.Operator
-import com.library.pbamobile.model.PhoneContact
+import com.library.pbamobile.model.*
 import com.library.pbamobile.utils.Constant
 import com.library.pbamobile.utils.ExternalPermissionManager
 import com.library.pbamobile.utils.Utility
@@ -58,7 +57,7 @@ object PBAManager {
 
     var dataType=DataType.NONE
 
-    fun fetchDeviceInfo(context: Context, callbackListener: PBACallbackListener){
+    fun fetchDeviceInfo(context: Context, onSuccess: OnSuccess<DeviceInfo>, onFailure: OnFailure<Exception>?){
         dataType=DataType.DEVICE_INFO
         val activity=context as Activity
         val externalPermissionManager= ExternalPermissionManager((activity as? AppCompatActivity)?.activityResultRegistry!!)
@@ -74,34 +73,34 @@ object PBAManager {
                     scope.launch(Dispatchers.IO){
                         val deviceInfoAsync= async { getDeviceInfo(context) }
                         val deviceInfo=deviceInfoAsync.await()
-                        callbackListener.onSuccess(deviceInfo)
+                        onSuccess(deviceInfo)
                         dataType=DataType.NONE
                     }
                 }else{
-                    callbackListener.onFailure(Exception())
+                    onFailure?.let { it(Exception()) }
                 }
             }
         }else{
             scope.launch(Dispatchers.IO){
                 val deviceInfoAsync= async { getDeviceInfo(context) }
                 val deviceInfo=deviceInfoAsync.await()
-                callbackListener.onSuccess(deviceInfo)
+                onSuccess(deviceInfo)
             }
         }
     }
 
-    fun fetchLocation(context: Context, callbackListener: PBACallbackListener){
+    fun fetchLocation(context: Context, onSuccess: OnSuccess<LocationDetail>, onFailure: OnFailure<Exception>?){
         dataType=DataType.LOCATION
         val activity=context as Activity
         val externalPermissionManager=ExternalPermissionManager((activity as? AppCompatActivity)?.activityResultRegistry!!)
 
         val PERMISSIONS= arrayOf(
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
         )
 
         if(hasPermission(context, *PERMISSIONS)){
-            getLocation(context, callbackListener)
+            getLocation(context, onSuccess, onFailure)
         }else{
 
             externalPermissionManager
@@ -109,20 +108,20 @@ object PBAManager {
                 .observe(activity){ granted->
                     if(granted){
                         if(hasPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION)){
-                            getLocation(context, callbackListener)
+                            getLocation(context, onSuccess, onFailure)
                         }else{
                             externalPermissionManager
                                 .requestPermission(Manifest.permission.ACCESS_COARSE_LOCATION)
                                 .observe(activity){ _granted->
                                     if(_granted){
-                                        getLocation(context, callbackListener)
+                                        getLocation(context, onSuccess, onFailure)
                                     }else{
-                                        callbackListener.onFailure(Exception(Constant.MESSAGE_LOCATION_PERMISSION_NOT_GRANTED))
+                                        onFailure?.let { it(Exception(Constant.MESSAGE_LOCATION_PERMISSION_NOT_GRANTED)) }
                                     }
                                 }
                         }
                     }else{
-                        callbackListener.onFailure(Exception(Constant.MESSAGE_LOCATION_PERMISSION_NOT_GRANTED))
+                        onFailure?.let { it(Exception(Constant.MESSAGE_LOCATION_PERMISSION_NOT_GRANTED)) }
                     }
                 }
 
@@ -130,33 +129,58 @@ object PBAManager {
 
     }
 
-    fun fetchApplicationList(context: Context, callbackListener: PBACallbackListener){
+    fun fetchApplicationList(context: Context, onSuccess: OnSuccess<ArrayList<InstalledApplication>>,
+                             onFailure: OnFailure<Exception>?){
         dataType=DataType.APPLICATION_LIST
         var installedAppList=ArrayList<InstalledApplication>()
 
         val intent=Intent(ACTION_MAIN, null)
         intent.addCategory(Intent.CATEGORY_LAUNCHER)
+        val pm: PackageManager = context.packageManager
 
         val installedPackageList=context.packageManager.queryIntentActivities(intent, 0)
 
         if(installedPackageList.isNotEmpty()){
 
-//            installedPackageList.forEach{
-//                installedAppList.add(it.activityInfo.packageName)
-//            }
             installedAppList= installedPackageList.map {
-                InstalledApplication(it.activityInfo.packageName)
+                val packageInfo: PackageInfo = pm.getPackageInfo(it.activityInfo.packageName, 0)
+                val appName = pm.getApplicationLabel(pm.getApplicationInfo(packageInfo.packageName,
+                        PackageManager.GET_META_DATA)) as String
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    InstalledApplication(
+                            appName,
+                            packageInfo.applicationInfo.icon,
+                            packageInfo.packageName,
+                            packageInfo.versionName,
+                            packageInfo.longVersionCode,
+                            packageInfo.firstInstallTime,
+                            packageInfo.lastUpdateTime,
+                    )
+                } else {
+                    InstalledApplication(
+                            appName,
+                            packageInfo.applicationInfo.icon,
+                            packageInfo.packageName,
+                            packageInfo.versionName,
+                            packageInfo.versionCode.toLong(),
+                            packageInfo.firstInstallTime,
+                            packageInfo.lastUpdateTime,
+                    )
+                }
+
             } as ArrayList<InstalledApplication>
 
-            callbackListener.onSuccess(installedAppList)
+            onSuccess(installedAppList)
             dataType=DataType.NONE
         }else{
-            callbackListener.onFailure(Exception(Constant.MESSAGE_NO_DATA_FOUND))
+            onFailure?.let { it(Exception(Constant.MESSAGE_NO_DATA_FOUND)) }
         }
 
     }
 
-    fun fetchContactList(context: Context, callbackListener: PBACallbackListener){
+    fun fetchContactList(context: Context, onSuccess: OnSuccess<ArrayList<PhoneContact>>,
+                         onFailure: OnFailure<Exception>?){
         dataType=DataType.CONTACTS
         val activity=context as Activity
         val externalPermissionManager=ExternalPermissionManager((activity as? AppCompatActivity)?.activityResultRegistry!!)
@@ -168,7 +192,7 @@ object PBAManager {
             scope.launch(Dispatchers.IO) {
                 val contactListAsync= async { getContactList(context) }
                 val contactList=contactListAsync.await()
-                callbackListener.onSuccess(contactList)
+                onSuccess(contactList)
                 dataType=DataType.NONE
             }
         }else{
@@ -179,17 +203,19 @@ object PBAManager {
                     scope.launch {
                         val contactListAsync= async { getContactList(context) }
                         val contactList=contactListAsync.await()
-                        callbackListener.onSuccess(contactList)
+                        onSuccess(contactList)
                         dataType=DataType.NONE
                     }
                 }else{
-                    callbackListener.onFailure(Exception())
+                    onFailure?.let { it(Exception()) }
                 }
             }
         }
     }
 
-    fun fetchAppTimeUsage(context: Context, timePeriod: Long, callbackListener: PBACallbackListener){
+    fun fetchAppTimeUsage(context: Context, timefrom: Long, timeTo: Long,
+                          onSuccess: OnSuccess<ArrayList<UsageStats>>,
+                          onFailure: OnFailure<Exception>?){
         dataType=DataType.APP_TIME_USAGE
         val activity=context as Activity
         val lifeCycle=(activity as? AppCompatActivity)?.lifecycle
@@ -197,9 +223,9 @@ object PBAManager {
 
         if(getGrantStatus(context)){
             scope?.launch(Dispatchers.IO) {
-                val usageStatsAsync= async { getUsageStats(context, timePeriod) }
+                val usageStatsAsync= async { getUsageStats(context, timefrom, timeTo) }
                 val usageStats=usageStatsAsync.await()
-                callbackListener.onSuccess(usageStats)
+                onSuccess(usageStats)
                 dataType=DataType.NONE
             }
 
@@ -228,8 +254,8 @@ object PBAManager {
             val hardware=Build.HARDWARE
             val serialNo=Build.SERIAL
             val androidId= Settings.Secure.getString(
-                context.contentResolver,
-                Settings.Secure.ANDROID_ID
+                    context.contentResolver,
+                    Settings.Secure.ANDROID_ID
             )
             val resolution= Utility.getScreenResolution(context)
             val density=Utility.getScreenDensity(context)
@@ -260,28 +286,28 @@ object PBAManager {
 
 
             deviceInfo=DeviceInfo(
-                manufacturer,
-                brand,
-                model,
-                hardware,
-                serialNo,
-                androidId,
-                resolution,
-                density,
-                user,
-                host,
-                apiLevel,
-                buildID,
-                buildTime,
-                securityPatch,
-                bootLoader,
-                "${ram}GB",
-                lstSimOperator,
-                simCount
+                    manufacturer,
+                    brand,
+                    model,
+                    hardware,
+                    serialNo,
+                    androidId,
+                    resolution,
+                    density,
+                    user,
+                    host,
+                    apiLevel,
+                    buildID,
+                    buildTime,
+                    securityPatch,
+                    bootLoader,
+                    "${ram}GB",
+                    lstSimOperator,
+                    simCount
             )
             return deviceInfo
         }catch (e: Exception){
-            Log.e(TAG,e.message.toString())
+            Log.e(TAG, e.message.toString())
         }
 
         return deviceInfo
@@ -289,7 +315,7 @@ object PBAManager {
 
 
     @SuppressLint("MissingPermission")
-    private fun getLocation(context: Context, callbackListener: PBACallbackListener){
+    private fun getLocation(context: Context, onSuccess: OnSuccess<LocationDetail>, onFailure: OnFailure<Exception>?){
 
         val locationManager:LocationManager  = context.getSystemService(LOCATION_SERVICE) as (LocationManager)
 
@@ -298,11 +324,11 @@ object PBAManager {
 
         if(isGPSEnabled) {
             locationManager.requestLocationUpdates(
-                LocationManager.NETWORK_PROVIDER,
-                0L,
-                0f
+                    LocationManager.NETWORK_PROVIDER,
+                    0L,
+                    0f
             ) { location ->
-                callbackListener.onSuccess(location)
+                fetchLocationDetail(context, location, onSuccess, onFailure)
                 dataType=DataType.NONE
             }
 
@@ -311,10 +337,58 @@ object PBAManager {
         }
     }
 
+    private fun fetchLocationDetail(context: Context, location: Location,
+                                    onSuccess: OnSuccess<LocationDetail>,
+                                    onFailure: OnFailure<Exception>?){
+        val activity=context as Activity
+        val lifeCycle=(activity as? AppCompatActivity)?.lifecycle
+        val scope=lifeCycle?.coroutineScope
+
+        scope?.launch(Dispatchers.IO) {
+            val locationDetailAsync= async { getLocationDetail(context, location) }
+            val locationDetail=locationDetailAsync.await()
+            onSuccess(locationDetail)
+            dataType=DataType.NONE
+        }
+
+    }
+
+    private fun getLocationDetail(context: Context, location: Location):LocationDetail{
+
+        val geocoder = Geocoder(context, Locale.getDefault())
+        val addresses: List<Address>? = geocoder.getFromLocation(location.latitude, location.longitude, 1)
+
+        var countryName=""
+        var locality=""
+        var subLocality=""
+        var postalCode=""
+        var adminArea=""
+
+
+        addresses?.get(0)?.let {
+            countryName=it.countryName?:""
+            locality=it.locality?:""
+            subLocality=it.subLocality?:""
+            postalCode=it.postalCode?:""
+            adminArea=it.adminArea?:""
+        }
+
+        return LocationDetail(
+                location.latitude,
+                location.longitude,
+                countryName,
+                locality,
+                subLocality,
+                postalCode,
+                adminArea
+        )
+
+    }
 
     private fun getUsageStats(
-        context: Context,
-        timePeriod: Long
+            context: Context,
+            timeFrom: Long,
+            timeTo: Long
     ): ArrayList<UsageStats> {
         val usageStatsManager=  context.getSystemService(Context.USAGE_STATS_SERVICE) as (UsageStatsManager)
         val packageManager=context.packageManager
@@ -324,8 +398,8 @@ object PBAManager {
         cal.add(Calendar.DAY_OF_MONTH, 0)
 
         val stats: List<UsageStats> = usageStatsManager.queryUsageStats(
-            UsageStatsManager.INTERVAL_BEST,
-            timePeriod, System.currentTimeMillis()
+                UsageStatsManager.INTERVAL_BEST,
+                timeFrom, timeTo
         )
 
         val map: ArrayMap<String, UsageStats> = ArrayMap()
@@ -337,8 +411,8 @@ object PBAManager {
             // load application labels for each application
             try {
                 val appInfo: ApplicationInfo = packageManager.getApplicationInfo(
-                    pkgStats.packageName,
-                    0
+                        pkgStats.packageName,
+                        0
                 )
                 val label = appInfo.loadLabel(packageManager).toString()
                 mAppLabelMap.put(pkgStats.packageName, label)
@@ -351,7 +425,7 @@ object PBAManager {
             } catch (e: PackageManager.NameNotFoundException) {
                 // This package may be gone.
 //                callbackListener.onFailure(e)
-                Log.e(TAG,e.message.toString())
+                Log.e(TAG, e.message.toString())
             }
         }
         mPackageStats.addAll(map.values)
@@ -367,45 +441,54 @@ object PBAManager {
         val contactList=ArrayList<PhoneContact>()
         val cr: ContentResolver = context.contentResolver
         val cur: Cursor? = cr.query(
-            ContactsContract.Contacts.CONTENT_URI,
-            null, null, null, null
+                ContactsContract.Contacts.CONTENT_URI,
+                null, null, null, null
         )
 
         if ((cur?.count ?: 0) > 0) {
             while (cur != null && cur.moveToNext()) {
                 val id: String = cur.getString(
-                    cur.getColumnIndex(ContactsContract.Contacts._ID)
+                        cur.getColumnIndex(ContactsContract.Contacts._ID)
                 )
                 val name: String = cur.getString(
-                    cur.getColumnIndex(
-                        ContactsContract.Contacts.DISPLAY_NAME
-                    )
+                        cur.getColumnIndex(
+                                ContactsContract.Contacts.DISPLAY_NAME
+                        )
                 )
                 val numberArr=ArrayList<String>()
                 val emailArr=ArrayList<String>()
                 if (cur.getInt(cur.getColumnIndex(ContactsContract.CommonDataKinds.Phone.HAS_PHONE_NUMBER)) > 0) {
                     val pCur: Cursor? = cr.query(
-                        ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
-                        null,
-                        ContactsContract.CommonDataKinds.Phone.CONTACT_ID + " = ?",
-                        arrayOf(id),
-                        null
+                            ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                            null,
+                            ContactsContract.CommonDataKinds.Phone.CONTACT_ID + " = ?",
+                            arrayOf(id),
+                            null
                     )
+
+                    val emailCur = cr.query(
+                            ContactsContract.CommonDataKinds.Email.CONTENT_URI,
+                            null,
+                            ContactsContract.CommonDataKinds.Email.CONTACT_ID + " = ?", arrayOf(id), null)
+
+
+                    while (emailCur!!.moveToNext()) {
+                        val email = emailCur.getString(emailCur.getColumnIndex(ContactsContract.CommonDataKinds.Email.DATA))
+                        emailArr.add(email) // Here you will get list of email
+                    }
+                    emailCur.close()
+
+
                     while (pCur?.moveToNext() == true) {
                         val phoneNo: String = pCur.getString(
-                            pCur.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
-                        )
-                        val email:String=pCur.getString(
-                            pCur.getColumnIndex(ContactsContract.CommonDataKinds.Email.DATA)
+                                pCur.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
                         )
                         numberArr.add(phoneNo)
-
-                        emailArr.add(email)
                     }
 
                     pCur?.close()
                 }
-                contactList.add(PhoneContact(name,numberArr,emailArr))
+                contactList.add(PhoneContact(name, numberArr, emailArr))
             }
         }
         cur?.close()
@@ -430,12 +513,12 @@ object PBAManager {
     fun getGrantStatus(context: Context): Boolean {
         val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
         val mode = appOps.checkOpNoThrow(
-            OPSTR_GET_USAGE_STATS,
-            Process.myUid(), context.getPackageName()
+                OPSTR_GET_USAGE_STATS,
+                Process.myUid(), context.getPackageName()
         )
         return if (mode == AppOpsManager.MODE_DEFAULT) {
             context.checkCallingOrSelfPermission(
-                Manifest.permission.PACKAGE_USAGE_STATS
+                    Manifest.permission.PACKAGE_USAGE_STATS
             ) == PackageManager.PERMISSION_GRANTED
         } else {
             mode == MODE_ALLOWED

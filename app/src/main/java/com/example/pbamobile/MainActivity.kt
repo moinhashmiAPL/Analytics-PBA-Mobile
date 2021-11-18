@@ -1,16 +1,10 @@
 package com.example.pbamobile
 
-import android.app.usage.UsageStats
-import android.content.pm.ResolveInfo
 import android.os.Bundle
 import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
 import android.widget.Button
 import com.library.pbamobile.PBAManager
-import com.library.pbamobile.callback.PBACallbackListener
-import com.library.pbamobile.model.InstalledApplication
-import com.library.pbamobile.model.PhoneContact
-import java.lang.Exception
 
 class MainActivity : AppCompatActivity() {
 
@@ -30,86 +24,57 @@ class MainActivity : AppCompatActivity() {
         buttonUsageStats=findViewById(R.id.buttonUsageStats)
         buttonContact=findViewById(R.id.buttonContact)
 
-        buttonDeviceInfo.setOnClickListener {
-            PBAManager.fetchDeviceInfo(it.context,object : PBACallbackListener {
-                override fun onSuccess(data: Any) {
-                    Log.i("DeviceINfo","DataReceived: $data")
-                }
-
-                override fun onFailure(e: Exception) {
-                    Log.e("DeviceINfo","exception: $e")
-                }
-
+        buttonDeviceInfo.setOnClickListener {view->
+            PBAManager.fetchDeviceInfo(view.context,{
+                Log.i("DeviceINfo","DataReceived: $it")
+            },{
+                Log.e("DeviceINfo","exception: $it")
             })
         }
 
-        buttonLocation.setOnClickListener{
-            PBAManager.fetchLocation(it.context,object: PBACallbackListener{
-                override fun onSuccess(data: Any) {
-                    Log.i("DeviceLocation","DataReceived: $data")
-                }
-
-                override fun onFailure(e: Exception) {
-                    Log.e("DeviceLocation","exception: $e")
-                }
-
+        buttonLocation.setOnClickListener{view->
+            PBAManager.fetchLocation(view.context,{
+                Log.i("DeviceLocation","DataReceived: $it")
+            },{
+                Log.e("DeviceLocation","exception: $it")
             })
         }
 
-        buttonApplicationList.setOnClickListener{
-            PBAManager.fetchApplicationList(it.context, object : PBACallbackListener {
-                override fun onSuccess(data: Any) {
-                    val list = data as ArrayList<InstalledApplication>
-                    Log.i("INSTALLED_APPS", "Received List Size: ${list.size}")
+        buttonApplicationList.setOnClickListener{view->
+            PBAManager.fetchApplicationList(view.context, {
+                Log.i("INSTALLED_APPS", "Received List Size: ${it.size}")
+                it.forEach {
+                    Log.i("INSTALLED_APPS", "Installed App: ${it}")
+                }
+            },{
+                Log.e("INSTALLED_APPS", "exception: $it")
+            })
+        }
 
-                    list.forEach {
-                        Log.i("INSTALLED_APPS", "Installed App: ${it.appName}")
+        buttonUsageStats.setOnClickListener{view->
+            PBAManager.fetchAppTimeUsage(view.context,
+                System.currentTimeMillis() - (1000*3600*24),
+                System.currentTimeMillis(),{
+                    Log.i("USAGE_STATS", "Received Stats List Size: ${it.size}")
+                    it.forEach {
+                        Log.i("USAGE_STATS", "Installed App Usage Stats: ${it}")
                     }
-                }
 
-                override fun onFailure(e: Exception) {
-                    Log.e("INSTALLED_APPS", "exception: $e")
-                }
-
+            },{
+                    Log.e("USAGE_STATS", "exception: $it")
             })
         }
 
-        buttonUsageStats.setOnClickListener{
-            PBAManager.fetchAppTimeUsage(it.context,System.currentTimeMillis() - (1000*3600*24), object : PBACallbackListener {
-                override fun onSuccess(data: Any) {
-                    val list = data as ArrayList<UsageStats>
-                    Log.i("USAGE_STATS", "Received Stats List Size: ${list.size}")
+        buttonContact.setOnClickListener{view->
 
-                    list.forEach {
-                        Log.i("USAGE_STATS", "Installed App Usage Stats: ${it.packageName}")
-                    }
+            PBAManager.fetchContactList(view.context,{
+                Log.i("CONTACT_LIST", "Contact List Size: ${it.size}")
+                it.forEach {
+                    Log.i("CONTACT_LIST", "Contact: ${it}")
                 }
 
-                override fun onFailure(e: Exception) {
-                    Log.e("USAGE_STATS", "exception: $e")
-                }
-
-            })
-        }
-
-        buttonContact.setOnClickListener{
-
-
-
-            PBAManager.fetchContactList(it.context,object: PBACallbackListener{
-                override fun onSuccess(data: Any) {
-                    val list = data as ArrayList<PhoneContact>
-                    Log.i("CONTACT_LIST", "Contact List Size: ${list.size}")
-
-                    list.forEach {
-                        Log.i("CONTACT_LIST", "Contact: ${it.name}")
-                    }
-                }
-
-                override fun onFailure(e: Exception) {
-                    Log.e("CONTACT_LIST", "exception: $e")
-                }
-
+            },{
+                Log.e("CONTACT_LIST", "exception: $it")
             })
         }
 
