@@ -57,7 +57,7 @@ class MainActivity : AppCompatActivity() {
                 System.currentTimeMillis(),{
                     Log.i("USAGE_STATS", "Received Stats List Size: ${it.size}")
                     it.forEach {
-                        Log.i("USAGE_STATS", "Installed App Usage Stats: ${it}")
+                        Log.i("USAGE_STATS", "Installed App Usage Stats: ${it.appName}")
                     }
 
             },{

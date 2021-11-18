@@ -36,6 +36,14 @@ import androidx.core.app.AppOpsManagerCompat.MODE_ALLOWED
 import androidx.lifecycle.coroutineScope
 import com.library.pbamobile.model.*
 import com.library.pbamobile.utils.Constant
+import com.library.pbamobile.utils.Constant.Companion.BUTTON_CANCEL
+import com.library.pbamobile.utils.Constant.Companion.BUTTON_NO
+import com.library.pbamobile.utils.Constant.Companion.BUTTON_OK
+import com.library.pbamobile.utils.Constant.Companion.BUTTON_YES
+import com.library.pbamobile.utils.Constant.Companion.MESSAGE_ALLOW_TIME_USAGE
+import com.library.pbamobile.utils.Constant.Companion.MESSAGE_TURN_ON_GPS
+import com.library.pbamobile.utils.Constant.Companion.TITLE_ALLOW_FROM_SETTINGS
+import com.library.pbamobile.utils.Constant.Companion.TITLE_GPS
 import com.library.pbamobile.utils.ExternalPermissionManager
 import com.library.pbamobile.utils.Utility
 import com.library.pbamobile.utils.Utility.hasPermission
@@ -214,7 +222,7 @@ object PBAManager {
     }
 
     fun fetchAppTimeUsage(context: Context, timefrom: Long, timeTo: Long,
-                          onSuccess: OnSuccess<ArrayList<UsageStats>>,
+                          onSuccess: OnSuccess<ArrayList<AppUsageStats>>,
                           onFailure: OnFailure<Exception>?){
         dataType=DataType.APP_TIME_USAGE
         val activity=context as Activity
@@ -230,7 +238,14 @@ object PBAManager {
             }
 
         }else{
-            context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+            showSettingsAlert(
+                    context,
+                    TITLE_ALLOW_FROM_SETTINGS,
+                    MESSAGE_ALLOW_TIME_USAGE,
+                    BUTTON_OK,
+                    BUTTON_CANCEL,
+                    Settings.ACTION_USAGE_ACCESS_SETTINGS
+            )
         }
 
     }
@@ -333,7 +348,8 @@ object PBAManager {
             }
 
         }else{
-            showSettingsAlert(context)
+            showSettingsAlert(context,TITLE_GPS,MESSAGE_TURN_ON_GPS,BUTTON_YES,BUTTON_NO,
+                    Settings.ACTION_LOCATION_SOURCE_SETTINGS)
         }
     }
 
@@ -389,10 +405,10 @@ object PBAManager {
             context: Context,
             timeFrom: Long,
             timeTo: Long
-    ): ArrayList<UsageStats> {
+    ): ArrayList<AppUsageStats> {
         val usageStatsManager=  context.getSystemService(Context.USAGE_STATS_SERVICE) as (UsageStatsManager)
         val packageManager=context.packageManager
-        val mPackageStats: ArrayList<UsageStats> = ArrayList()
+        val listUsageStats=ArrayList<AppUsageStats>()
 
         val cal: Calendar = Calendar.getInstance()
         cal.add(Calendar.DAY_OF_MONTH, 0)
@@ -404,6 +420,7 @@ object PBAManager {
 
         val map: ArrayMap<String, UsageStats> = ArrayMap()
         val mAppLabelMap:ArrayMap<String, String> = ArrayMap()
+        val pm: PackageManager = context.packageManager
         val statCount = stats.size
         for (i in 0 until statCount) {
             val pkgStats = stats[i]
@@ -414,13 +431,28 @@ object PBAManager {
                         pkgStats.packageName,
                         0
                 )
+                val packageInfo: PackageInfo = pm.getPackageInfo(pkgStats.packageName, 0)
+                val appName = pm.getApplicationLabel(pm.getApplicationInfo(packageInfo.packageName,
+                    PackageManager.GET_META_DATA)) as String
                 val label = appInfo.loadLabel(packageManager).toString()
                 mAppLabelMap.put(pkgStats.packageName, label)
                 val existingStats: UsageStats? = map.get(pkgStats.packageName)
                 if (existingStats == null) {
                     map.put(pkgStats.packageName, pkgStats)
+
+                    listUsageStats.add(AppUsageStats(
+                        appName,
+                        pkgStats.lastTimeUsed,
+                        pkgStats.totalTimeInForeground
+                    ))
+
                 } else {
                     existingStats.add(pkgStats)
+                    listUsageStats.add(AppUsageStats(
+                        appName,
+                        pkgStats.lastTimeUsed,
+                        pkgStats.totalTimeInForeground
+                    ))
                 }
             } catch (e: PackageManager.NameNotFoundException) {
                 // This package may be gone.
@@ -428,9 +460,11 @@ object PBAManager {
                 Log.e(TAG, e.message.toString())
             }
         }
-        mPackageStats.addAll(map.values)
+//        appStats.addAll(map.values)
 
-        return mPackageStats
+        listUsageStats.sortBy { it.lastUsed }
+        listUsageStats.reverse()
+        return listUsageStats
 
     }
 
@@ -498,15 +532,17 @@ object PBAManager {
 
 
 
-    private fun showSettingsAlert(context: Context) {
+    private fun showSettingsAlert(context: Context,title:String,message:String,
+                                  positiveButtonTitle:String,negativeButtonTitle:String,
+                                  settingIntentName:String) {
         val alertDialog: AlertDialog.Builder = AlertDialog.Builder(context)
-        alertDialog.setTitle("GPS is not Enabled!")
-        alertDialog.setMessage("Do you want to turn on GPS?")
-        alertDialog.setPositiveButton("Yes") { dialog, which ->
+        alertDialog.setTitle(title)
+        alertDialog.setMessage(message)
+        alertDialog.setPositiveButton(positiveButtonTitle) { dialog, which ->
             dialog.dismiss()
-            context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+            context.startActivity(Intent(settingIntentName))
         }
-        alertDialog.setNegativeButton("No") { dialog, which -> dialog.cancel() }
+        alertDialog.setNegativeButton(negativeButtonTitle) { dialog, which -> dialog.cancel() }
         alertDialog.show()
     }
 
